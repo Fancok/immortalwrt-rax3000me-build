@@ -1,70 +1,241 @@
-# immortalwrt-rax3000me-build
+# RAX3000Me 定制固件与刷机记录
 
-RAX3000Me / RAX3000M 云编译仓库。源码来自 `tfnhui/immortalwrt-mt798x-25.12`
-（上游 `chasey-dev/immortalwrt-mt798x-rebase`），内核 6.12，ImmortalWrt 25.12，
-MTK 闭源无线驱动 mt_wifi（SDK 7.6.7.3）。
+> **设备**：CMCC RAX3000Me（USB3.0 / DDR3 / 128MB SPI NAND）
+> **固件**：ImmortalWrt 25.12-SNAPSHOT（内核 6.12.87）+ MTK 闭源无线驱动 mt_wifi
+> **编译仓库**：https://github.com/Fancok/immortalwrt-rax3000me-build
+> **日期**：2026-10-01
 
-推送 `.github/workflows/build.yml` 即自动编译，产物发布到 Releases。
+---
 
-## 刷机前必做：备份
+## 一、硬件判定（最关键的一步）
 
-Telnet / SSH 进原厂系统：
+RAX3000Me 存在两种硬件版本，**刷错固件会导致四个网口全部失效**：
 
-```sh
-cat /proc/mtd           # 确认 BL2 / u-boot-env / Factory / FIP 各是 mtd 几
-dd if=/dev/mtd0 of=/tmp/mtd0_BL2.bin
-dd if=/dev/mtd1 of=/tmp/mtd1_u-boot-env.bin
-dd if=/dev/mtd2 of=/tmp/mtd2_Factory.bin
-dd if=/dev/mtd3 of=/tmp/mtd3_FIP.bin
-```
+| 交换机 | dmesg 关键字 | 应刷的固件 |
+|---|---|---|
+| **MT7531AE**（老批次） | `mt7530 mdio-bus:1f` | `cmcc_rax3000m` |
+| **AN8855**（新批次） | `8855` | `cmcc_rax3000me` |
 
-`Factory` 是无线校准 EEPROM，信号好坏全靠它，务必传回电脑保存。
-
-## 硬件判定（决定刷哪个 sysupgrade）
+判定命令（在原厂 Telnet 里执行）：
 
 ```sh
 dmesg | grep -iE "7531|7530|8855|switch|mdio"
 ```
 
-- 出现 `mt7531` / `mt7530` → 老硬件，sysupgrade 用 **cmcc_rax3000m** 的
-- 出现 `8855` → 新硬件，sysupgrade 用 **cmcc_rax3000me** 的
+**本机实测输出**：
 
-本仓库 DDR3 机型（带 USB3.0 的 RAX3000Me）：BL2 / FIP **只能**用
-`cmcc_rax3000me-nand-ddr3-` 开头的两个文件，刷 ddr4 版必砖。
-
-## 刷机步骤
-
-1. 原厂系统里写入新 bootloader
-
-```sh
-mtd write /tmp/...-cmcc_rax3000me-nand-ddr3-preloader.bin BL2
-mtd write /tmp/...-cmcc_rax3000me-nand-ddr3-bl31-uboot.fip FIP
+```
+[   76.066962] mt7530 mdio-bus:1f lan2: Link is Up - 1Gbps/Full
 ```
 
-分区名大小写报错就用设备节点：`BL2` -> `/dev/mtd0`，`FIP` -> `/dev/mtd3`。
+→ 判定为 **MT7531AE**，因此系统固件用 `cmcc_rax3000m`，BL2/FIP 用 `cmcc_rax3000me-nand-ddr3`。
 
-2. TFTP 起临时系统
+### 内存类型同样不能搞错
 
-- 把 `initramfs-recovery.itb` 重命名，**去掉文件名里的版本号**，
-  改成 `immortalwrt-mediatek-filogic-cmcc_rax3000me-initramfs-recovery.itb`
-- 电脑有线网卡设 `192.168.1.254`，掩码 `255.255.255.0`，网关 `192.168.1.1`
-- tftpd64 指向该文件目录，Server interfaces 绑 `192.168.1.254`
-- 网线接 LAN 口，断电 -> 按住 Reset 通电 -> 等 5~6 秒松手
+| 内存 | bootloader 后缀 |
+|---|---|
+| DDR3（本机） | `nand-ddr3` |
+| DDR4 | `nand-ddr4` |
 
-3. 浏览器开 `192.168.1.1`，上传对应的 `squashfs-sysupgrade.itb`
+**刷错内存版本 = 变砖。** 官方 25.12 源码里 `cmcc_rax3000me` 已被改成 AN8855，只有 24.10 分支的 `rax3000me` 仍是 MT7531 —— 这就是本项目 bootloader 取自 24.10 的原因。
 
-板型名不匹配时（Me 的机器刷 M 的固件）用：`sysupgrade -F -n /tmp/xxx.itb`
+---
 
-## 固件内容
+## 二、原厂分区表
 
-- 闭源无线与加速：mtwifi-cfg、turboacc-mtk、eqos-mtk、kmod-mt_wifi、kmod-warp、kmod-mediatek_hnat
-- 常用：磁盘管理、ksmbd 文件共享、ttyd、UPnP、WOL、DDNS、WireGuard、Tailscale、
-  流量统计、SQM、watchcat、minidlna、udpxy、Adblock、statistics、Argon / Material3 主题
-- 智能家居：mosquitto（MQTT）、umdns、igmpproxy、USB 串口驱动（Zigbee 协调器用）
+```
+mtd0  128MB   spi0.0        ← 整片 flash，禁止操作
+mtd1    1MB   BL2
+mtd2  512KB   u-boot-env
+mtd3    2MB   Factory       ★ 无线校准 EEPROM，必须备份
+mtd4    2MB   FIP
+mtd5   61MB   ubi
+mtd6   37MB   plugins
+mtd7    8MB   fwk
+mtd8    8MB   fwk2
+```
 
-默认管理地址与密码以刷入固件说明为准。
+⚠️ 编号不是常见的 0~3 布局，`spi0.0` 占了 mtd0，备份命令记得 +1。
 
-## 救砖
+---
 
-TTL（CH340）接 GND/RX/TX，用 mtk_uartboot 加载 `mt7981-ram-ddr3-bl2.bin`
-（tfnhui Release 里有）内存启动后重刷。
+## 三、刷机流程（已验证通过）
+
+### 1. 备份（原厂 Telnet）
+
+```sh
+mkdir -p /tmp/bak
+dd if=/dev/mtd1 of=/tmp/bak/mtd1_BL2.bin
+dd if=/dev/mtd2 of=/tmp/bak/mtd2_u-boot-env.bin
+dd if=/dev/mtd3 of=/tmp/bak/mtd3_Factory.bin
+dd if=/dev/mtd4 of=/tmp/bak/mtd4_FIP.bin
+ls -la /tmp/bak          # 应为 1MB / 512KB / 2MB / 2MB
+cd /tmp/bak
+tftp -p -l mtd3_Factory.bin -r mtd3_Factory.bin 你的电脑IP
+```
+
+### 2. 写入 bootloader
+
+```sh
+mtd write /tmp/preloader.bin BL2      # 可能被拒绝，见踩坑 1
+mtd write /tmp/fip.bin FIP            # 这个必须成功
+```
+
+### 3. TFTP 起临时系统
+
+- 电脑有线改静态：`192.168.1.254` / `255.255.255.0` / 网关 `192.168.1.1`
+- tftpd64 目录放 `immortalwrt-mediatek-filogic-cmcc_rax3000me-initramfs-recovery.itb`
+- **断开 WiFi**，网线插 LAN 口
+- 断电 → 按住 Reset → 通电 → 15 秒后松手
+- 传完自动进系统，浏览器开 `http://192.168.1.1`
+
+### 4. 刷正式固件
+
+系统 → 备份/升级 → 上传 `immortalwrt-mediatek-filogic-cmcc_rax3000m-squashfs-sysupgrade.itb`
+
+---
+
+## 四、当前固件功能清单
+
+### 无线与网络
+
+| 功能 | 说明 |
+|---|---|
+| 双频 WiFi | 2.4G + 5G，5G 已开 160MHz（2401 Mbps） |
+| 发射功率 | 23 dBm（2.4G）/ 24 dBm（5G），高于开源的 20 dBm 上限 |
+| 硬件加速 | HNAT（双 PPE）+ WARP 无线加速 + 全锥形 NAT |
+| TurboACC | 流量卸载、DNS 缓存开关 |
+| EQoS | MTK 硬件限速，可按设备限速 |
+| SQM + CAKE | 抗 bufferbloat |
+| UPnP / DDNS / WOL | 端口映射、动态域名、网络唤醒 |
+| udpxy | IPTV 组播转单播 |
+
+### 存储与电视播放
+
+| 功能 | 说明 |
+|---|---|
+| SMB 共享 | ksmbd（内核态），电视/电脑直接访问 |
+| DLNA | minidlna，电视直接浏览播放 |
+| 磁盘管理 | diskman：分区、格式化、挂载 |
+| 文件系统 | ext4 / NTFS3 / exFAT / F2FS / Btrfs / VFAT 通吃 |
+| USB3.0 + UASP | 高速传输，插盘自动挂载 |
+| wsdd2 | Windows 网上邻居发现 |
+| smartmontools | 硬盘健康检测 |
+
+### 服务与监控
+
+- Adblock 全网去广告
+- TTyd 网页终端
+- Watchcat 看门狗 / 定时重启
+- collectd + rrdtool 实时图表
+- nlbwmon 每设备流量统计
+- 首页显示 CPU / WiFi 温度、负载、内存
+
+### 系统
+
+- apk 软件包管理（在线装插件）
+- 硬件加密加速（safexcel）
+- zram 内存压缩、BBR 拥塞控制
+- 中文界面 + Argon 主题
+
+### 下一版新增（正在编译）
+
+| 功能 | 用途 |
+|---|---|
+| hd-idle | 硬盘空闲自动休眠 |
+| aria2 + ariang | 磁力/BT/HTTP 下载机，AriaNg 网页界面 |
+| tailscale | 异地访问家里，无需公网 IP |
+
+---
+
+## 五、踩坑记录（真实遇到过）
+
+### 1. BL2 分区写不进去
+
+```
+mtd write /tmp/preloader.bin BL2
+Could not open mtd device: BL2
+```
+
+**原因**：原厂把 BL2 设为只读保护。**解决**：不用刷 BL2 —— 官方指引原话是"只写入 FIP 分区就能启动"，且原厂 BL2 本身就是 DDR3 的正确版本。
+
+### 2. tftpd64 切到 Tftp Client 标签后服务端停止
+
+**原因**：tftpd64 的服务只在对应标签激活时运行。**解决**：始终停在 Tftp Server 标签。诊断：`netstat -an -p udp | grep ":69"`。
+
+### 3. TFTP 传不进去，日志全空
+
+排查顺序：ping 192.168.1.1 通不通 → tftpd64 的 Server interfaces 是否选了 192.168.1.254 → Windows 防火墙是否放行。
+
+### 4. uboot 请求的文件名
+
+必须是 `immortalwrt-mediatek-filogic-cmcc_rax3000me-initramfs-recovery.itb`（去掉版本号）。名字用 rax3000me（uboot 硬编码请求），内容用 rax3000m 的镜像（MT7531 设备树），这样刷正式固件时不用加 `-F`。
+
+### 5. 分区编号不是 0~3
+
+原厂第一个是 `spi0.0`，所以 BL2 是 mtd1、Factory 是 mtd3。操作前先 `cat /proc/mtd`。
+
+### 6. GitHub Actions 的 YAML heredoc 陷阱
+
+```
+Invalid workflow file: build.yml#L45 - You have an error in your yaml syntax
+```
+
+**原因**：`run: |` 块里写 heredoc，YAML 要求缩进一致而 shell 要求 EOF 顶格，冲突。
+**解决**：配置单独放 `extra.config`，workflow 里只写 `cat ../extra.config >> .config`。
+
+### 7. 官方 Release 里没有 RAX3000Me 固件
+
+tfnhui 的 Release 只有 `cmcc_rax3000m`（且 bootloader 是 DDR4 版，本机不能用），必须自己编译。
+
+### 8. luci-app-tailscale 源里已移除
+
+第一次编译没编进去才发现的。加包前先验证：
+`immortalwrt/packages/<分类>/<包名>/Makefile` 和 `immortalwrt/luci/applications/luci-app-<名>/Makefile`。
+
+### 9. GitHub 连接器权限不足（403）
+
+**解决**：GitHub → Settings → Applications → Installed GitHub Apps → codebuddy-connector → Configure → 权限改 Read and write。
+
+### 10. apk 没有 list-installed 命令
+
+用原生语法 `apk info`（`apk info | grep luci-app`）。
+
+### 11. LuCI 菜单里"网络共享"不在网络下
+
+入口是 **NAS → 网络共享**；无线配置在 **网络 → 无线**（闭源驱动已接入标准无线页面）。
+
+### 12. 编译设备太多会超时
+
+上游 `mt7981-ax3000.config` 默认开 80+ 设备，必超 Actions 的 6 小时上限。用 sed 只留需要的两台。
+
+---
+
+## 六、常用命令
+
+```sh
+# 查看已装包
+apk info | grep luci-app
+
+# 装/卸软件
+apk update && apk add 包名
+apk del 包名
+
+# 硬件加速状态
+lsmod | grep -E "warp|mt_wifi|hnat"
+dmesg | grep -iE "warp|wed|hnat" | head
+
+# 备份当前配置（刷机前必做）
+sysupgrade -b /tmp/backup.tar.gz
+
+# 查看硬盘
+lsblk
+cat /proc/mounts | grep sd
+```
+
+---
+
+## 七、救砖方案
+
+TTL（CH340）接 GND / RX / TX，用 `mt7981-ram-ddr3-bl2.bin` + mtk_uartboot 内存启动后重刷。
+原厂备份（BL2 / u-boot-env / Factory / FIP）保存在本机 backup 目录。
