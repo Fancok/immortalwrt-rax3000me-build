@@ -1,0 +1,132 @@
+name: Build ImmortalWrt 25.12 for RAX3000Me
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
+
+      - name: Clone source
+        run: |
+          git clone --depth 1 -b 25.12 https://github.com/tfnhui/immortalwrt-mt798x-25.12.git openwrt
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Prepare config
+        run: |
+          cd openwrt
+          if [ -f defconfig/mt7981-ax3000.config ]; then
+            cp defconfig/mt7981-ax3000.config .config
+          else
+            cp defconfig/rax3000m-openclash.config .config
+          fi
+          # 关掉其余 80+ 设备，只留两台，避免编译超时
+          sed -i -E 's/^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_(.+)=y$/# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_\1 is not set/' .config
+          sed -i -E 's/^CONFIG_TARGET_mediatek_filogic_DEVICE_(.+)=y$/# CONFIG_TARGET_mediatek_filogic_DEVICE_\1 is not set/' .config
+          cat >> .config <<'EOF'
+CONFIG_TARGET_MULTI_PROFILE=y
+CONFIG_TARGET_PER_DEVICE_ROOTFS=y
+CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y
+CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000m=y
+CONFIG_PACKAGE_kmod-mt_wifi=y
+CONFIG_PACKAGE_kmod-warp=y
+CONFIG_PACKAGE_kmod-mediatek_hnat=y
+CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
+CONFIG_PACKAGE_luci-app-turboacc-mtk=y
+CONFIG_PACKAGE_luci-app-eqos-mtk=y
+CONFIG_PACKAGE_luci-app-diskman=y
+CONFIG_PACKAGE_luci-app-ksmbd=y
+CONFIG_PACKAGE_ksmbd-server=y
+CONFIG_PACKAGE_luci-app-ttyd=y
+CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-app-wol=y
+CONFIG_PACKAGE_luci-app-ddns=y
+CONFIG_PACKAGE_luci-app-wireguard=y
+CONFIG_PACKAGE_luci-app-tailscale=y
+CONFIG_PACKAGE_luci-app-nlbwmon=y
+CONFIG_PACKAGE_luci-app-sqm=y
+CONFIG_PACKAGE_luci-app-watchcat=y
+CONFIG_PACKAGE_luci-app-minidlna=y
+CONFIG_PACKAGE_luci-app-udpxy=y
+CONFIG_PACKAGE_luci-app-adblock=y
+CONFIG_PACKAGE_luci-app-statistics=y
+CONFIG_PACKAGE_luci-theme-argon=y
+CONFIG_PACKAGE_luci-theme-material3=y
+
+# ===== 智能家居 / IoT =====
+CONFIG_PACKAGE_mosquitto-ssl=y
+CONFIG_PACKAGE_mosquitto-client-ssl=y
+CONFIG_PACKAGE_umdns=y
+CONFIG_PACKAGE_igmpproxy=y
+# Zigbee / Thread 协调器 USB 棒的串口驱动（插路由器 USB3.0 口）
+CONFIG_PACKAGE_kmod-usb-acm=y
+CONFIG_PACKAGE_kmod-usb-serial-cp210x=y
+CONFIG_PACKAGE_kmod-usb-serial-ch341=y
+CONFIG_PACKAGE_kmod-usb-serial-ftdi=y
+CONFIG_PACKAGE_kmod-usb-serial-pl2303=y
+# Zigbee2MQTT 需要 node，体积大，确定要用再取消下面两行注释
+# CONFIG_PACKAGE_node=y
+# CONFIG_PACKAGE_node-npm=y
+EOF
+          make defconfig
+
+      - name: Download sources
+        run: |
+          cd openwrt
+          make download -j$(nproc)
+
+      - name: Build
+        run: |
+          cd openwrt
+          make -j$(nproc)
+          rm -rf bin/targets/mediatek/filogic/packages
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-25.12-rax3000me-firmware
+          path: openwrt/bin/targets/mediatek/filogic/
+          if-no-files-found: warn
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "RAX3000Me 固件 ${{ steps.date.outputs.date }} #${{ github.run_number }}"
+          tag_name: "build-${{ steps.date.outputs.date }}-${{ github.run_number }}"
+          body: |
+            ## 自动编译固件
+
+            - 编译时间：${{ steps.date.outputs.date }}
+            - 编译编号：#${{ github.run_number }}
+            - 设备：CMCC RAX3000Me / RAX3000M
+            - 内核：6.12（ImmortalWrt 25.12）
+            - 无线：MTK 闭源驱动 mt_wifi（SDK 7.6.7.3）
+            - 插件：mtwifi-cfg、turboacc-mtk、磁盘管理、文件共享、UPnP、DDNS、WireGuard、
+              Tailscale、流量统计、SQM、DLNA、udpxy、Adblock、MQTT(mosquitto)、mDNS、
+              USB 串口驱动、Argon 主题等
+
+            ## 刷机提醒
+
+            - BL2/FIP 只能刷 `cmcc_rax3000me-nand-ddr3` 开头的两个文件（DDR3 专用）
+            - sysupgrade 按交换机选：老硬件 MT7531 用 rax3000m 的，新硬件 AN8855 用 rax3000me 的
+          files: openwrt/bin/targets/mediatek/filogic/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
