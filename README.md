@@ -145,6 +145,8 @@ mtd write /tmp/fip.bin FIP            # 这个必须成功
 | hd-idle | 硬盘空闲自动休眠 |
 | aria2 + ariang | 磁力/BT/HTTP 下载机，AriaNg 网页界面 |
 | tailscale | 异地访问家里，无需公网 IP |
+| smartdns | 更快更准的 DNS 解析，游戏/下载均受益 |
+| filebrowser | 网页文件管理器，管理下载目录 |
 
 ---
 
@@ -239,3 +241,46 @@ cat /proc/mounts | grep sd
 
 TTL（CH340）接 GND / RX / TX，用 `mt7981-ram-ddr3-bl2.bin` + mtk_uartboot 内存启动后重刷。
 原厂备份（BL2 / u-boot-env / Factory / FIP）保存在本机 backup 目录。
+
+---
+
+## 八、上游项目与致谢
+
+本固件不是独立作品，完全站在这些开源项目之上。
+
+### 核心源码
+
+| 项目 | 说明 |
+|---|---|
+| [chasey-dev/immortalwrt-mt798x-rebase](https://github.com/chasey-dev/immortalwrt-mt798x-rebase) | **核心**：ImmortalWrt 25.12 + MTK OpenWrt Feeds 补丁，提供闭源无线驱动 `mt_wifi`（SDK 7.6.7.3）与硬件加速 |
+| [tfnhui/immortalwrt-mt798x-25.12](https://github.com/tfnhui/immortalwrt-mt798x-25.12) | 上游自动同步镜像，本仓库编译时拉取此源 |
+| [immortalwrt/immortalwrt](https://github.com/immortalwrt/immortalwrt) | ImmortalWrt 发行版 |
+| [openwrt/openwrt](https://github.com/openwrt/openwrt) | OpenWrt 上游 |
+| [immortalwrt/packages](https://github.com/immortalwrt/packages) | 软件包源（aria2、hd-idle、tailscale、smartdns、filebrowser、transmission 等） |
+| [immortalwrt/luci](https://github.com/immortalwrt/luci) | LuCI 界面源（luci-app-* 各插件） |
+
+### Bootloader 来源
+
+| 文件 | 来源 |
+|---|---|
+| `cmcc_rax3000me-nand-ddr3-preloader.bin` / `-bl31-uboot.fip` | [ImmortalWrt 24.10-SNAPSHOT](https://downloads.immortalwrt.org/releases/24.10-SNAPSHOT/targets/mediatek/filogic/)（该分支的 rax3000me 仍是 MT7531，匹配本机硬件） |
+| `mt7981-ram-ddr3-bl2.bin`（救砖用） | 同上，配合 TTL + mtk_uartboot 使用 |
+
+### 主要插件上游
+
+| 插件 | 上游项目 |
+|---|---|
+| aria2 | https://github.com/aria2/aria2 |
+| AriaNg | https://github.com/mayswind/AriaNg |
+| hd-idle | https://sourceforge.net/projects/hd-idle/ |
+| tailscale | https://github.com/tailscale/tailscale |
+| smartdns | https://github.com/pymumu/smartdns |
+| filebrowser | https://github.com/filebrowser/filebrowser |
+| ksmbd | https://github.com/cifsd-team/ksmbd |
+| minidlna | https://sourceforge.net/projects/minidlna/ |
+| mt_wifi / warp / hnat（闭源） | 联发科 MTK OpenWrt Feeds |
+
+### 参考过的资料
+
+- [OpenWrt TOH - CMCC RAX3000M](https://openwrt.org/toh/cmcc/rax3000m) — 硬件版本与刷机指引
+- [hanwckf/bl-mt798x](https://github.com/hanwckf/bl-mt798x) — MT798x uboot（本项目未直接使用，作参考）
