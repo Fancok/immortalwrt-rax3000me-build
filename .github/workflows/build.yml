@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/build.yml'
+      - 'extra.config'
 
 permissions:
   contents: write
@@ -13,6 +14,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Get current date
         id: date
         run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
@@ -41,51 +45,7 @@ jobs:
           # 关掉其余 80+ 设备，只留两台，避免编译超时
           sed -i -E 's/^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_(.+)=y$/# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_\1 is not set/' .config
           sed -i -E 's/^CONFIG_TARGET_mediatek_filogic_DEVICE_(.+)=y$/# CONFIG_TARGET_mediatek_filogic_DEVICE_\1 is not set/' .config
-          cat >> .config <<'EOF'
-CONFIG_TARGET_MULTI_PROFILE=y
-CONFIG_TARGET_PER_DEVICE_ROOTFS=y
-CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y
-CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000m=y
-CONFIG_PACKAGE_kmod-mt_wifi=y
-CONFIG_PACKAGE_kmod-warp=y
-CONFIG_PACKAGE_kmod-mediatek_hnat=y
-CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
-CONFIG_PACKAGE_luci-app-turboacc-mtk=y
-CONFIG_PACKAGE_luci-app-eqos-mtk=y
-CONFIG_PACKAGE_luci-app-diskman=y
-CONFIG_PACKAGE_luci-app-ksmbd=y
-CONFIG_PACKAGE_ksmbd-server=y
-CONFIG_PACKAGE_luci-app-ttyd=y
-CONFIG_PACKAGE_luci-app-upnp=y
-CONFIG_PACKAGE_luci-app-wol=y
-CONFIG_PACKAGE_luci-app-ddns=y
-CONFIG_PACKAGE_luci-app-wireguard=y
-CONFIG_PACKAGE_luci-app-tailscale=y
-CONFIG_PACKAGE_luci-app-nlbwmon=y
-CONFIG_PACKAGE_luci-app-sqm=y
-CONFIG_PACKAGE_luci-app-watchcat=y
-CONFIG_PACKAGE_luci-app-minidlna=y
-CONFIG_PACKAGE_luci-app-udpxy=y
-CONFIG_PACKAGE_luci-app-adblock=y
-CONFIG_PACKAGE_luci-app-statistics=y
-CONFIG_PACKAGE_luci-theme-argon=y
-CONFIG_PACKAGE_luci-theme-material3=y
-
-# ===== 智能家居 / IoT =====
-CONFIG_PACKAGE_mosquitto-ssl=y
-CONFIG_PACKAGE_mosquitto-client-ssl=y
-CONFIG_PACKAGE_umdns=y
-CONFIG_PACKAGE_igmpproxy=y
-# Zigbee / Thread 协调器 USB 棒的串口驱动（插路由器 USB3.0 口）
-CONFIG_PACKAGE_kmod-usb-acm=y
-CONFIG_PACKAGE_kmod-usb-serial-cp210x=y
-CONFIG_PACKAGE_kmod-usb-serial-ch341=y
-CONFIG_PACKAGE_kmod-usb-serial-ftdi=y
-CONFIG_PACKAGE_kmod-usb-serial-pl2303=y
-# Zigbee2MQTT 需要 node，体积大，确定要用再取消下面两行注释
-# CONFIG_PACKAGE_node=y
-# CONFIG_PACKAGE_node-npm=y
-EOF
+          cat ../extra.config >> .config
           make defconfig
 
       - name: Download sources
@@ -125,7 +85,7 @@ EOF
 
             ## 刷机提醒
 
-            - BL2/FIP 只能刷 `cmcc_rax3000me-nand-ddr3` 开头的两个文件（DDR3 专用）
+            - BL2/FIP 只能刷 cmcc_rax3000me-nand-ddr3 开头的两个文件（DDR3 专用）
             - sysupgrade 按交换机选：老硬件 MT7531 用 rax3000m 的，新硬件 AN8855 用 rax3000me 的
           files: openwrt/bin/targets/mediatek/filogic/*
         env:
